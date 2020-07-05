@@ -8,6 +8,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from .objects import Experience, Education, Scraper, Interest, Accomplishment
 import os
 
+
 _logger = logging.getLogger("LinkedinScraper-Person")
 
 
@@ -80,6 +81,93 @@ class Person(Scraper):
                 'please verify the capcha then press any key to continue...')
             self.scrape_not_logged_in(close_on_complete=close_on_complete)
 
+    def scrape_position_type(self, position):
+        position_types = {
+            "pv-entity__summary-info-v2": "mutiple_positions",
+            "pv-entity__summary-info": "one_position"
+        }
+        for position_class in position_types:
+            position_type = position.find_elements_by_class_name(
+                position_class)
+            if position_type:
+                return position_types[position_class]
+
+    def scrape_position_title(self, position, position_type=None):
+        if position_type == "one_position" or position_type is None:
+            try:
+                position_title = position.find_element_by_tag_name(
+                    "h3").text.encode('utf-8').strip()
+                return position_title
+            except Exception:
+                _logger.error(traceback.format_exc())
+                return None
+        elif position_type == "mutiple_positions":
+            try:
+                position_title = position.find_elements_by_tag_name(
+                    "h3")[1].find_elements_by_tag_name(
+                    "span")[1].text.encode('utf-8').strip()
+                return position_title
+            except Exception:
+                _logger.error(traceback.format_exc())
+                return None
+        else:
+            return None
+
+    def scrape_position_company(self, position, position_type=None):
+        if position_type == "one_position" or position_type is None:
+            try:
+                company = position.find_elements_by_tag_name(
+                    "p")[1].text.encode('utf-8').strip()
+                return company
+            except Exception:
+                _logger.error(traceback.format_exc())
+                return None
+        elif position_type == "mutiple_positions":
+            try:
+                company = position.find_elements_by_tag_name(
+                    "h3")[0].find_elements_by_tag_name(
+                    "span")[1].text.encode('utf-8').strip()
+                return company
+            except Exception:
+                _logger.error(traceback.format_exc())
+                return None
+        else:
+            return None
+
+    def scrape_position_times(self, position):
+        try:
+            times = str(
+                position.find_elements_by_tag_name(
+                    "h4")[0].find_elements_by_tag_name(
+                    "span")[1].text.strip()
+            )
+            from_date = " ".join(times.split(' ')[:2])
+            to_date = " ".join(times.split(' ')[3:])
+        except Exception:
+            _logger.error(traceback.format_exc())
+            from_date, to_date = (None, None)
+        return from_date, to_date
+
+    def scrape_position_duration(self, position):
+        try:
+            duration = position.find_elements_by_tag_name(
+                "h4")[1].find_elements_by_tag_name(
+                "span")[1].text.strip()
+        except Exception:
+            _logger.error(traceback.format_exc())
+            duration = None
+        return duration
+
+    def scrape_position_location(self, position):
+        try:
+            location = position.find_elements_by_tag_name(
+                "h4")[2].find_elements_by_tag_name(
+                "span")[1].text.strip()
+        except Exception:
+            _logger.error(traceback.format_exc())
+            location = None
+        return location
+
     def scrape_logged_in(self, close_on_complete=True):  # NOQA
         driver = self.driver
         duration = None
@@ -103,30 +191,16 @@ class Person(Scraper):
         if (exp is not None):
             for position in exp.find_elements_by_class_name(
                     "pv-position-entity"):
-                position_title = position.find_element_by_tag_name(
-                    "h3").text.encode('utf-8').strip()
+                position_type = self.scrape_position_type(position)
 
-                try:
-                    company = position.find_elements_by_tag_name(
-                        "p")[1].text.encode('utf-8').strip()
-                    times = str(
-                        position.find_elements_by_tag_name(
-                            "h4")[0].find_elements_by_tag_name(
-                            "span")[1].text.strip()
-                    )
-                    from_date = " ".join(times.split(' ')[:2])
-                    to_date = " ".join(times.split(' ')[3:])
-                    duration = position.find_elements_by_tag_name(
-                        "h4")[1].find_elements_by_tag_name(
-                        "span")[1].text.strip()
-                    location = position.find_elements_by_tag_name(
-                        "h4")[2].find_elements_by_tag_name(
-                        "span")[1].text.strip()
-                except Exception:
-                    _logger.error(traceback.format_exc())
-                    company = None
-                    from_date, to_date, duration, location = (
-                        None, None, None, None)
+                position_title = self.scrape_position_title(
+                    position, position_type)
+
+                company = self.scrape_position_company(
+                    position, position_type)
+                from_date, to_date = self.scrape_position_times(position)
+                duration = self.scrape_position_duration(position)
+                location = self.scrape_position_location(position)
 
                 experience = Experience(
                     position_title=position_title,
