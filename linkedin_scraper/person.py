@@ -1,13 +1,12 @@
 import logging
 import traceback
-import requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from .objects import Experience, Education, Scraper, Interest, Accomplishment
 import os
-
+from selenium.webdriver.common.action_chains import ActionChains
 
 _logger = logging.getLogger("LinkedinScraper-Person")
 
@@ -16,11 +15,16 @@ class Person(Scraper):
 
     __TOP_CARD = "pv-top-card"
 
-    def __init__(self, linkedin_url=None, name=None, experiences=None,  # NOQA
+    def __init__(self, linkedin_url=None, name=None, title=None, country=None,
+                 location=None, summary=None, experiences=None,
                  educations=None, interests=None, accomplishments=None,
                  driver=None, get=True, scrape=True, close_on_complete=True):
         self.linkedin_url = linkedin_url
         self.name = name
+        self.title = title
+        self.location = location
+        self.summary = summary
+
         if experiences is None:
             experiences = []
         self.experiences = experiences
@@ -81,6 +85,53 @@ class Person(Scraper):
                 'please verify the capcha then press any key to continue...')
             self.scrape_not_logged_in(close_on_complete=close_on_complete)
 
+    def scrape_by_class_name(self, model_object, class_name):
+        try:
+            element = model_object.find_element_by_class_name(
+                class_name
+            )
+            return element.text
+        except Exception:
+            _logger.error(traceback.format_exc())
+            return None
+
+    def scrape_summary(self, driver):
+        try:
+            about_section = driver.find_element_by_class_name(
+                'pv-about__summary-text')
+
+            last_row = about_section.find_elements_by_class_name(
+                'lt-line-clamp__line')[-1]
+            _logger.debug(f'Find last rows {last_row.text}')
+            buttons = last_row.find_elements_by_id(
+                "line-clamp-show-more-button")
+            _logger.debug(f'Buttons {buttons}')
+
+            if len(buttons) > 0:
+                element = driver.find_element_by_id(
+                    "line-clamp-show-more-button")
+                actions = ActionChains(driver)
+                actions.move_to_element(element).click().perform()
+                _logger.debug(f'Clicked')
+
+                element = WebDriverWait(driver, 20).until(
+                    EC.presence_of_element_located(
+                        (By.CLASS_NAME, "lt-line-clamp__raw-line")
+                    )
+                )
+
+                summary = about_section.find_element_by_class_name(
+                    'lt-line-clamp__raw-line').text.replace('<br>', '')
+                return summary
+            else:
+                summary = about_section.find_elements_by_class_name(
+                    'lt-line-clamp__line')
+                summary_text = ' '.join([element.text for element in summary])
+                return summary_text
+        except Exception:
+            _logger.error(traceback.format_exc())
+            return None
+
     def scrape_position_type(self, position):
         position_types = {
             "pv-entity__summary-info-v2": "mutiple_positions",
@@ -96,19 +147,19 @@ class Person(Scraper):
         if position_type == "one_position" or position_type is None:
             try:
                 position_title = position.find_element_by_tag_name(
-                    "h3").text.encode('utf-8').strip()
+                    "h3").text.strip()
                 return position_title
             except Exception:
-                _logger.error(traceback.format_exc())
+                _logger.debug(traceback.format_exc())
                 return None
         elif position_type == "mutiple_positions":
             try:
                 position_title = position.find_elements_by_tag_name(
                     "h3")[1].find_elements_by_tag_name(
-                    "span")[1].text.encode('utf-8').strip()
+                    "span")[1].text.strip()
                 return position_title
             except Exception:
-                _logger.error(traceback.format_exc())
+                _logger.debug(traceback.format_exc())
                 return None
         else:
             return None
@@ -117,19 +168,19 @@ class Person(Scraper):
         if position_type == "one_position" or position_type is None:
             try:
                 company = position.find_elements_by_tag_name(
-                    "p")[1].text.encode('utf-8').strip()
+                    "p")[1].text.strip()
                 return company
             except Exception:
-                _logger.error(traceback.format_exc())
+                _logger.debug(traceback.format_exc())
                 return None
         elif position_type == "mutiple_positions":
             try:
                 company = position.find_elements_by_tag_name(
                     "h3")[0].find_elements_by_tag_name(
-                    "span")[1].text.encode('utf-8').strip()
+                    "span")[1].text.strip()
                 return company
             except Exception:
-                _logger.error(traceback.format_exc())
+                _logger.debug(traceback.format_exc())
                 return None
         else:
             return None
@@ -144,7 +195,7 @@ class Person(Scraper):
             from_date = " ".join(times.split(' ')[:2])
             to_date = " ".join(times.split(' ')[3:])
         except Exception:
-            _logger.error(traceback.format_exc())
+            _logger.debug(traceback.format_exc())
             from_date, to_date = (None, None)
         return from_date, to_date
 
@@ -154,7 +205,7 @@ class Person(Scraper):
                 "h4")[1].find_elements_by_tag_name(
                 "span")[1].text.strip()
         except Exception:
-            _logger.error(traceback.format_exc())
+            _logger.debug(traceback.format_exc())
             duration = None
         return duration
 
@@ -164,7 +215,7 @@ class Person(Scraper):
                 "h4")[2].find_elements_by_tag_name(
                 "span")[1].text.strip()
         except Exception:
-            _logger.error(traceback.format_exc())
+            _logger.debug(traceback.format_exc())
             location = None
         return location
 
@@ -173,11 +224,30 @@ class Person(Scraper):
         duration = None
 
         root = driver.find_element_by_class_name(self.__TOP_CARD)
-        self.name = root.find_elements_by_xpath(
-            "//section/div/div/div/*/li")[0].text.strip()
+
+        try:
+            self.name = root.find_elements_by_xpath(
+                "//section/div/div/div/*/li")[0].text.strip()
+        except Exception:
+            _logger.debug(traceback.format_exc())
+
+        try:
+            self.title = root.find_elements_by_xpath(
+                "//section/div/div/div/h2")[0].text.strip()
+        except Exception:
+            _logger.debug(traceback.format_exc())
+
+        try:
+            self.location = root.find_elements_by_xpath(
+                "//section/div/div/div/ul"
+            )[1].find_elements_by_tag_name('li')[0].text.strip()
+        except Exception:
+            _logger.debug(traceback.format_exc())
 
         driver.execute_script(
             "window.scrollTo(0, Math.ceil(document.body.scrollHeight/2));")
+
+        self.summary = self.scrape_summary(driver)
 
         # get experience
         try:
@@ -245,7 +315,7 @@ class Person(Scraper):
                     from_date, to_date = (times.split(
                         " ")[0], times.split(" ")[2])
                 except Exception:
-                    _logger.error(traceback.format_exc())
+                    _logger.debug(traceback.format_exc())
                     degree = None
                     from_date, to_date = (None, None)
                 education = Education(
@@ -371,12 +441,18 @@ class Person(Scraper):
     def __repr__(self):
         return (
             "{name}\n\n"
+            "{title}\n\n"
+            "{location}\n\n"
+            "{summary}\n\n"
             "Experience\n{exp}\n\n"
             "Education\n{edu}\n\n"
             "Interest\n{int}\n\n"
             "Accomplishments\n{acc}"
         ).format(
             name=self.name,
+            title=self.title,
+            location=self.location,
+            summary=self.summary,
             exp=self.experiences,
             edu=self.educations,
             int=self.interests,
